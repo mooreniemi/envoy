@@ -1,11 +1,11 @@
+use serde_derive::Deserialize;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio::task;
 use warp::Filter;
-use serde_derive::{Deserialize};
-use std::time::Instant;
-use std::collections::HashMap;
 
 use rust_bert::bert::{BertConfigResources, BertModelResources, BertVocabResources};
 use rust_bert::pipelines::common::ModelType;
@@ -22,7 +22,7 @@ fn qa_model_config() -> QuestionAnsweringConfig {
         ModelType::Bert,
         Resource::Remote(RemoteResource::from_pretrained(BertModelResources::BERT_QA)),
         Resource::Remote(RemoteResource::from_pretrained(
-                BertConfigResources::BERT_QA,
+            BertConfigResources::BERT_QA,
         )),
         Resource::Remote(RemoteResource::from_pretrained(BertVocabResources::BERT_QA)),
         None,  //merges resource only relevant with ModelType::Roberta
@@ -46,14 +46,20 @@ async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infa
         question: query.question.clone(),
         context: query.context.clone(),
     };
-    log::info!("ask for context='{}' question='{}'",
-        query.context.clone(), query.question.clone());
+    log::info!(
+        "ask for context='{}' question='{}'",
+        query.context.clone(),
+        query.question.clone()
+    );
 
     let start = Instant::now();
     let answers = qa_model.lock().await.predict(&[qa_input], 1, 32);
     let top_answer = answers[0][0].answer.clone();
-    log::info!("top answer='{:?}', took {:?}",
-        top_answer.clone(), start.elapsed());
+    log::info!(
+        "top answer='{:?}', took {:?}",
+        top_answer.clone(),
+        start.elapsed()
+    );
 
     let mut response = HashMap::new();
     response.insert("question", query.question);
@@ -66,10 +72,12 @@ async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infa
 #[derive(Debug, Deserialize)]
 pub struct QaQuery {
     pub question: String,
-    pub context: String
+    pub context: String,
 }
 
-fn with_model(qa: QaModel) -> impl Filter<Extract = (QaModel,), Error = std::convert::Infallible> + Clone {
+fn with_model(
+    qa: QaModel,
+) -> impl Filter<Extract = (QaModel,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || qa.clone())
 }
 
@@ -89,7 +97,7 @@ async fn main() {
         m
     })
     .await
-        .expect("got model");
+    .expect("got model");
 
     let ask_handler = warp::path!("ask")
         .and(warp::get())
