@@ -1,7 +1,8 @@
-use warp::Filter;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task;
+use warp::Filter;
 
 use rust_bert::bert::{BertConfigResources, BertModelResources, BertVocabResources};
 use rust_bert::pipelines::common::ModelType;
@@ -12,14 +13,13 @@ use rust_bert::resources::{RemoteResource, Resource};
 
 type QaModel = Arc<Mutex<QuestionAnsweringModel>>;
 
-#[tokio::main]
-async fn qa_model_config() -> QuestionAnsweringConfig {
+fn qa_model_config() -> QuestionAnsweringConfig {
     println!("set up qa model config");
     let config = QuestionAnsweringConfig::new(
         ModelType::Bert,
         Resource::Remote(RemoteResource::from_pretrained(BertModelResources::BERT_QA)),
         Resource::Remote(RemoteResource::from_pretrained(
-                BertConfigResources::BERT_QA,
+            BertConfigResources::BERT_QA,
         )),
         Resource::Remote(RemoteResource::from_pretrained(BertVocabResources::BERT_QA)),
         None,  //merges resource only relevant with ModelType::Roberta
@@ -30,8 +30,7 @@ async fn qa_model_config() -> QuestionAnsweringConfig {
     config
 }
 
-#[tokio::main]
-async fn qa_model(config: QuestionAnsweringConfig) -> QaModel {
+fn qa_model(config: QuestionAnsweringConfig) -> QaModel {
     println!("set up qa model");
     let qa_model = QuestionAnsweringModel::new(config).expect("qa model failed to load");
 
@@ -56,25 +55,24 @@ async fn ask(qa_model: QaModel) -> Result<impl warp::Reply, Infallible> {
 }
 
 #[tokio::main]
-async fn server(qa_model: QaModel) {
+async fn main() {
+    // NOTE: have to download the model before booting up
+    let qa_model: QaModel = task::spawn_blocking(move || {
+        println!("setting up qa model config");
+        let c = qa_model_config();
+        println!("finished setting up qa model config");
+
+        println!("setting up qa model");
+        let m = qa_model(c);
+        println!("finished setting up qa model");
+        m
+    })
+    .await
+    .expect("got model");
+
     let ask_handler = warp::path!("ask")
         .map(move || qa_model.clone())
         .and_then(ask);
 
-    warp::serve(ask_handler)
-        .run(([127, 0, 0, 1], 3030))
-        .await;
-}
-
-fn main() {
-    println!("setting up qa model config");
-    let c = qa_model_config();
-    println!("finished setting up qa model config");
-
-    println!("setting up qa model");
-    let m = qa_model(c);
-    println!("finished setting up qa model");
-
-    println!("now going to start server");
-    server(m);
+    warp::serve(ask_handler).run(([127, 0, 0, 1], 3030)).await;
 }
