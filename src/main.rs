@@ -85,6 +85,12 @@ fn with_model(
     warp::any().map(move || qa.clone())
 }
 
+fn json_body() -> impl Filter<Extract = (QaQuery,), Error = warp::Rejection> + Clone {
+    // When accepting a body, we want a JSON body
+    // (and to reject huge payloads)...
+    warp::body::content_length_limit(1024 * 16).and(warp::body::json())
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -103,11 +109,19 @@ async fn main() {
     .await
     .expect("got model");
 
-    let ask_handler = warp::path!("ask")
+    let qp_handler = warp::path!("ask")
         .and(warp::get())
         .and(warp::query::<QaQuery>())
+        .and(with_model(qa_model.clone()))
+        .and_then(ask);
+
+    let json_handler = warp::path!("ask")
+        .and(warp::get())
+        .and(json_body())
         .and(with_model(qa_model))
         .and_then(ask);
 
-    warp::serve(ask_handler).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(qp_handler.or(json_handler))
+        .run(([127, 0, 0, 1], 3030))
+        .await;
 }
