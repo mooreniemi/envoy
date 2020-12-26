@@ -17,7 +17,7 @@ use rust_bert::resources::{RemoteResource, Resource};
 type QaModel = Arc<Mutex<QuestionAnsweringModel>>;
 
 fn qa_model_config() -> QuestionAnsweringConfig {
-    log::debug!("set up qa model config");
+    let start = Instant::now();
     let config = QuestionAnsweringConfig::new(
         ModelType::Bert,
         Resource::Remote(RemoteResource::from_pretrained(BertModelResources::BERT_QA)),
@@ -30,6 +30,7 @@ fn qa_model_config() -> QuestionAnsweringConfig {
         false,
         None,
     );
+    log::debug!("set up qa model config took {:?}", start.elapsed());
     config
 }
 
@@ -47,7 +48,7 @@ async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infa
         context: query.context.clone(),
     };
     log::info!(
-        "ask for context='{}' question='{}'",
+        "ask for context={:?} question={:?}",
         query.context.clone(),
         query.question.clone()
     );
@@ -55,9 +56,11 @@ async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infa
     let start = Instant::now();
     let answers = qa_model.lock().await.predict(&[qa_input], 1, 32);
     let top_answer = answers[0][0].answer.clone();
+    let top_score = answers[0][0].score.clone();
     log::info!(
-        "top answer='{:?}', took {:?}",
+        "top answer={:?} ({:?}) took {:?}",
         top_answer.clone(),
+        top_score.clone(),
         start.elapsed()
     );
 
@@ -65,6 +68,7 @@ async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infa
     response.insert("question", query.question);
     response.insert("context", query.context);
     response.insert("answer", top_answer);
+    response.insert("score", top_score.to_string());
 
     Ok(warp::reply::json(&response))
 }
