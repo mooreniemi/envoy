@@ -10,7 +10,7 @@ use warp::Filter;
 use rust_bert::bert::{BertConfigResources, BertModelResources, BertVocabResources};
 use rust_bert::pipelines::common::ModelType;
 use rust_bert::pipelines::question_answering::{
-    QaInput, QuestionAnsweringConfig, QuestionAnsweringModel,
+    Answer, QaInput, QuestionAnsweringConfig, QuestionAnsweringModel,
 };
 use rust_bert::resources::{RemoteResource, Resource};
 
@@ -43,20 +43,26 @@ fn qa_model(config: QuestionAnsweringConfig) -> QaModel {
 }
 
 async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infallible> {
-    let qa_input = QaInput {
-        question: query.question.clone(),
-        context: query.context.clone(),
-    };
-    log::info!(
-        "ask for context={:?} question={:?}",
-        query.context.clone(),
-        query.question.clone()
-    );
+    let mut candidates = Vec::new();
+    for context in query.contexts {
+        let qa_input = QaInput {
+            question: query.question.clone(),
+            context: context.clone(),
+        };
+        log::info!(
+            "ask for context={:?} question={:?}",
+            context.clone(),
+            query.question.clone()
+        );
+        candidates.append(&mut vec![qa_input]);
+    }
 
     let start = Instant::now();
-    let answers = qa_model.lock().await.predict(&[qa_input], 1, 32);
-    let top_answer = answers[0][0].answer.clone();
-    let top_score = answers[0][0].score.clone();
+    let answers = qa_model.lock().await.predict(&candidates, 1, 32);
+    let mut answers: Vec<Answer> = answers.into_iter().flatten().collect();
+    answers.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
+    let top_answer = answers[0].answer.clone();
+    let top_score = answers[0].score.clone();
     log::info!(
         "top answer={:?} ({:?}) took {:?}",
         top_answer.clone(),
@@ -66,7 +72,6 @@ async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infa
 
     let mut response = HashMap::new();
     response.insert("question", query.question);
-    response.insert("context", query.context);
     response.insert("answer", top_answer);
     response.insert("score", top_score.to_string());
 
@@ -76,7 +81,7 @@ async fn ask(query: QaQuery, qa_model: QaModel) -> Result<impl warp::Reply, Infa
 #[derive(Debug, Deserialize)]
 pub struct QaQuery {
     pub question: String,
-    pub context: String,
+    pub contexts: Vec<String>,
 }
 
 fn with_model(
@@ -109,6 +114,9 @@ async fn main() {
     .await
     .expect("got model");
 
+    // FIXME: warp doesn't handle query params array
+    // so this can't parse a unified type with the json
+    // https://github.com/seanmonstar/warp/issues/732
     let qp_handler = warp::path!("ask")
         .and(warp::get())
         .and(warp::query::<QaQuery>())
